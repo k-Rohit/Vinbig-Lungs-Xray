@@ -1,2 +1,2 @@
 # Vinbig-Lungs-Xray
-Lung Abnormality detection using yolov-9
+Lung Abnormality detection using yolov-8

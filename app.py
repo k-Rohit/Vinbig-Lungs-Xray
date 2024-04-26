@@ -1,13 +1,26 @@
 import streamlit as st
 import os
+import cv2
 import shutil
 from PIL import Image
 import torchvision.transforms as transforms
 import torch
 import timm
 import torch.nn as nn
+from ultralytics import YOLO
 from monai.networks.blocks.dynunet_block import UnetOutBlock
 from monai.networks.blocks.unetr_block import UnetrBasicBlock, UnetrPrUpBlock, UnetrUpBlock
+from stats import show_statistics
+from modelpipeline import pipeline
+from streamlit_lottie import st_lottie 
+
+
+# Ensure necessary folders exist
+os.makedirs("temp", exist_ok=True)
+os.makedirs("Disease_Present", exist_ok=True)
+os.makedirs("Disease_Absent", exist_ok=True)
+os.makedirs("result", exist_ok=True)
+st.set_page_config(page_title="Lung's Abnormality Detection")
 
 num_classes=2
 BATCH_SIZE = 8
@@ -190,20 +203,9 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = DaViT_UnetR_Modelv2(num_classes, fine_tune=False)
 model.to(device)
 
-# # print(model)
-# print()
-
-# x = torch.randn(1, 1, IMAGE_SIZE[0], IMAGE_SIZE[1]).to(device)
-
-
-# output = model(x)
-# print("Model output's shape:", output.shape)
-# print(output) # logits 
 
 model.load_state_dict(torch.load('classifier_model.pth', map_location=torch.device('cpu')))
-
 model.eval() 
-
 image_size = (224, 224)
 
 def preprocess_image(image_path, image_size):
@@ -221,12 +223,19 @@ def preprocess_image(image_path, image_size):
     image_tensor = image_tensor.unsqueeze(0)
     return image_tensor
 
+
+def classify_and_move(image_path, image_tensor):
+    output_logits = model(image_tensor)
+    predicted_label = torch.argmax(output_logits, dim=1)
+    target_folder = "Disease_Absent" if predicted_label == 1 else "Disease_Present"
+    shutil.move(image_path, os.path.join(target_folder, os.path.basename(image_path)))
+    return target_folder
+    
+
 def print_output(folder_path):
-    
-    image_files=os.listdir(folder_path)
-    
-    disease_present_folder="Disease_Present"
-    disease_absent_folder="Disease Absent"
+    image_files = os.listdir(folder_path)
+    disease_present_folder = "Disease_Present"
+    disease_absent_folder = "Disease_Absent"
     
     if not os.path.exists(disease_present_folder):
         os.makedirs(disease_present_folder)
@@ -236,20 +245,92 @@ def print_output(folder_path):
     
     for image in image_files:
         if image.endswith(('.png','.jpg','.jpeg')):
-            image_path=os.path.join(folder_path,image)
-            image_tensor=preprocess_image(image_path, image_size)
-            image_tensor=image_tensor.to(device)
-            output_logits=model(image_tensor)
-            predicted_label=torch.argmax(output_logits, dim=1)
-            if(predicted_label==1):
-                shutil.copy(image_path,"Disease_Absent")
+            image_path = os.path.join(folder_path, image)
+            image_tensor = preprocess_image(image_path, image_size)
+            image_tensor = image_tensor.to(device)
+            output_logits = model(image_tensor)
+            predicted_label = torch.argmax(output_logits, dim=1)
+            if predicted_label == 1:
+                shutil.move(image_path, disease_absent_folder)
             else:
-                shutil.copy(image_path,"Disease_Present")
+                shutil.move(image_path, disease_present_folder)
 
-def list_files_in_folder(folder_path):
-    files = os.listdir(folder_path)
-    return files
 
 def main():
-    st.title("Folder Input Example")
-    
+    st.sidebar.title("Navigation")
+    page = st.sidebar.radio("Go to", ["Disease Classification", "Dataset Statistics","Model Pipeline"])
+    if page == "Disease Classification":
+        st.title("Lung's X-ray Abnormalities Detection")
+        uploaded_files = st.file_uploader("Choose images...", accept_multiple_files=True, type=["png", "jpg", "jpeg"])
+        if uploaded_files:
+            columns = {
+                "Disease_Present": [],
+                "Disease_Absent": []
+            }
+
+            for uploaded_file in uploaded_files:
+                bytes_data = uploaded_file.read()
+                file_path = f"temp/{uploaded_file.name}"
+                with open(file_path, "wb") as f:
+                    f.write(bytes_data)
+
+                image_tensor = preprocess_image(file_path, IMAGE_SIZE).to(device)
+                folder = classify_and_move(file_path, image_tensor)
+                columns[folder].append(uploaded_file.name)
+
+            col1, col2= st.columns(2)
+            image_height = 300
+            # with col1:
+            #     st.header("Diseased")
+            #     for image_name in columns["Disease_Present"]:
+            #         st.image(f"Disease_Present/{image_name}", caption=image_name)
+
+            with col1:
+                st.header("Non-Diseased")
+                for image_name in columns["Disease_Absent"]:
+                    st.image(f"Disease_Absent/{image_name}", caption=image_name)
+            with col2:
+                st.header("Diseased")
+                diseased_files = [os.path.join("Disease_Present", f) for f in os.listdir("Disease_Present")]
+                # Initialize YOLO model
+                model = YOLO('best_vinbig.pt')
+                    
+                # Process each image with YOLO and save the detection results
+                results = model.predict(diseased_files,save=True)  # return a list of Results objects
+
+                detection_output=os.listdir("runs/detect/predict")
+
+                for file_name in detection_output:
+                    st.image(os.path.join("runs/detect/predict",file_name), caption=file_name)
+
+                
+                shutil.rmtree('runs/detect/predict')
+
+                # for i, result in enumerate(results):
+                #         # Save the detection result image
+                #     result.save(filename=f'result/result_{i}.jpg')
+                # result_files = os.listdir("result")
+                # for file_name in result_files:
+                #     st.image(os.path.join("result", file_name), caption=file_name)
+
+
+
+    elif page == "Dataset Statistics":
+        show_statistics()
+    elif page == "Model Pipeline":
+        pipeline()
+
+    st.sidebar.markdown(
+        """
+        ## Application Information
+        This application is designed to classify diseases from medical images.
+        You can navigate between different pages using the sidebar.
+        """
+    )
+
+
+if __name__ == "__main__":
+    main()
+
+
+
