@@ -48,7 +48,7 @@ The following preprocessing steps were applied to the dataset:
 ### Classifier
 
 1. **DenseNet:**
-   - **Validation Accuracy:** Low
+   - **Validation Accuracy:** 75%
    - **Precision and Recall:** Approximately 50%
 
 2. **Stack Model (MobileNetV2 + DenseNet):**
