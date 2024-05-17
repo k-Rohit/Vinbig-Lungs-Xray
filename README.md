@@ -8,10 +8,6 @@
   - [Classifier](#classifier)
   - [Detection Model](#detection-model)
 - [Deployment](#deployment)
-- [How to Use](#how-to-use)
-- [Contributing](#contributing)
-- [License](#license)
-- [Acknowledgements](#acknowledgements)
 
 ## Introduction
 
